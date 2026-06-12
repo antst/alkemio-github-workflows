@@ -131,7 +131,11 @@ jobs:
 
   test-extra:
     if: inputs.extra-suite-tags != ''
-    name: ${{ inputs.extra-suite-tags != '' && format('test-{0}', inputs.extra-suite-tags) || 'test-extra' }}
+    # Static name on purpose: GitHub does not evaluate `inputs.*` expressions
+    # in the displayed name of a SKIPPED job — callers without an extra suite
+    # were showing the raw `${{ ... }}` text in their checks list. The tags in
+    # use are echoed by the run step for callers that do enable the suite.
+    name: test-extra
     runs-on: ubuntu-latest
     permissions:
       contents: read
