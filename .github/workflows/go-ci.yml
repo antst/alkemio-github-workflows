@@ -131,7 +131,7 @@ jobs:
 
   test-extra:
     if: inputs.extra-suite-tags != ''
-    name: test-${{ inputs.extra-suite-tags }}
+    name: ${{ inputs.extra-suite-tags != '' && format('test-{0}', inputs.extra-suite-tags) || 'test-extra' }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
