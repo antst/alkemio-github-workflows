@@ -1,0 +1,29 @@
+# Reusable OpenAPI contract lint (for handwritten contracts under contracts/;
+# generated specs are gated by go-ci's openapi staleness job instead).
+name: Contract Lint
+
+on:
+  workflow_call:
+    inputs:
+      contract-path:
+        description: Path to the OpenAPI contract
+        type: string
+        default: contracts/openapi.yaml
+
+jobs:
+  lint-openapi:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Redocly lint
+        run: docker run --rm -v "$PWD":/spec redocly/cli lint '/spec/${{ inputs.contract-path }}'
+
+      - name: Upload contract artifact
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: openapi-contract
+          path: ${{ inputs.contract-path }}

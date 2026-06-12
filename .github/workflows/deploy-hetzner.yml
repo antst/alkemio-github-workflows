@@ -1,0 +1,149 @@
+# Reusable Hetzner k8s deploy: builds the amd64 image, pushes :sha to the
+# private registry, then either `kubectl set image` on an existing deployment
+# (default mode) or applies a full manifest via Azure/k8s-deploy
+# (manifest-path mode, for repos that keep their deployment manifest in-repo).
+#
+# Callers define the trigger (push to develop for dev, workflow_dispatch for
+# test/sandbox) and pass the env-specific kubeconfig secret. All names default
+# to the org conventions derived from the repo name.
+name: Deploy to Hetzner k8s
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: Environment label (dev / test / sandbox) — informational
+        type: string
+        required: true
+      image-name:
+        description: Registry image name; defaults to alkemio-<repo>
+        type: string
+        default: ''
+      deployment-name:
+        description: k8s deployment to update (set-image mode); defaults to alkemio-<repo>-deployment
+        type: string
+        default: ''
+      container-name:
+        description: Container within the deployment (set-image mode); defaults to alkemio-<repo>
+        type: string
+        default: ''
+      pull-secret-name:
+        description: Image pull secret name; defaults to <repo>-registry
+        type: string
+        default: ''
+      manifest-path:
+        description: Manifest file(s) for Azure/k8s-deploy mode; empty selects kubectl set-image mode
+        type: string
+        default: ''
+      extra-manifests:
+        description: Newline-separated manifests kubectl-applied before the image update (set-image mode)
+        type: string
+        default: ''
+      kubectl-version:
+        type: string
+        default: v1.31.14
+    secrets:
+      KUBECONFIG:
+        required: true
+      REGISTRY_LOGIN_SERVER:
+        required: true
+      REGISTRY_USERNAME:
+        required: true
+      REGISTRY_PASSWORD:
+        required: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Login to registry
+        uses: docker/login-action@v4.2.0
+        with:
+          registry: ${{ secrets.REGISTRY_LOGIN_SERVER }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build & push image
+        run: |
+          name="${{ inputs.image-name }}"
+          [ -n "$name" ] || name="alkemio-${{ github.event.repository.name }}"
+          IMAGE="${{ secrets.REGISTRY_LOGIN_SERVER }}/${name}"
+          docker build -f Dockerfile . -t "${IMAGE}:${{ github.sha }}"
+          docker push "${IMAGE}:${{ github.sha }}"
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Resolve names
+        id: names
+        run: |
+          repo="${{ github.event.repository.name }}"
+          image="${{ inputs.image-name }}";          [ -n "$image" ] || image="alkemio-${repo}"
+          deployment="${{ inputs.deployment-name }}"; [ -n "$deployment" ] || deployment="alkemio-${repo}-deployment"
+          container="${{ inputs.container-name }}";  [ -n "$container" ] || container="alkemio-${repo}"
+          pullsecret="${{ inputs.pull-secret-name }}"; [ -n "$pullsecret" ] || pullsecret="${repo}-registry"
+          {
+            echo "image=$image"
+            echo "deployment=$deployment"
+            echo "container=$container"
+            echo "pullsecret=$pullsecret"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v5.1.0
+        with:
+          version: ${{ inputs.kubectl-version }}
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Create image pull secret
+        run: |
+          kubectl create secret docker-registry '${{ steps.names.outputs.pullsecret }}' \
+            --docker-server=${{ secrets.REGISTRY_LOGIN_SERVER }} \
+            --docker-username=${{ secrets.REGISTRY_USERNAME }} \
+            --docker-password=${{ secrets.REGISTRY_PASSWORD }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Attach image pull secret to deployment
+        if: inputs.manifest-path == ''
+        run: |
+          kubectl patch deployment '${{ steps.names.outputs.deployment }}' -p \
+            '{"spec":{"template":{"spec":{"imagePullSecrets":[{"name":"${{ steps.names.outputs.pullsecret }}"}]}}}}'
+
+      - name: Apply extra manifests
+        if: inputs.manifest-path == '' && inputs.extra-manifests != ''
+        run: |
+          while IFS= read -r m; do
+            [ -n "$m" ] && kubectl apply -f "$m"
+          done <<< "${{ inputs.extra-manifests }}"
+
+      - name: Update deployment image
+        if: inputs.manifest-path == ''
+        run: |
+          kubectl set image 'deployment/${{ steps.names.outputs.deployment }}' \
+            '${{ steps.names.outputs.container }}=${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ steps.names.outputs.image }}:${{ github.sha }}'
+
+      - name: Apply manifest
+        if: inputs.manifest-path != ''
+        uses: Azure/k8s-deploy@v6.0.0
+        with:
+          manifests: ${{ inputs.manifest-path }}
+          images: |
+            ${{ secrets.REGISTRY_LOGIN_SERVER }}/${{ steps.names.outputs.image }}:${{ github.sha }}
+          imagepullsecrets: |
+            ${{ steps.names.outputs.pullsecret }}

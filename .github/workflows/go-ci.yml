@@ -1,0 +1,203 @@
+# Reusable Go CI: lint, race-enabled unit tests, optional build check,
+# optional generated-artifact staleness gates (sqlc, OpenAPI via apispec),
+# optional extra build-tagged test suite (e.g. vips).
+#
+# Tool version pins live HERE, once, for the whole org. Bump them in this
+# repo and every caller picks the change up via the @v1 tag.
+name: Go CI
+
+on:
+  workflow_call:
+    inputs:
+      go-test-flags:
+        description: Flags passed to `go test`
+        type: string
+        default: '-race -count=1'
+      coverage:
+        description: Collect a coverage profile and emit a summary (no gate)
+        type: boolean
+        default: true
+      golangci-lint-version:
+        description: golangci-lint version (org default pinned here)
+        type: string
+        default: v2.12.2
+      run-vet:
+        description: Run `go vet ./...` before lint
+        type: boolean
+        default: false
+      run-build:
+        description: Run a `go build ./...` check job
+        type: boolean
+        default: true
+      sqlc-version:
+        type: string
+        default: v1.30.0
+      sqlc-config:
+        description: Path to the sqlc config (e.g. sqlc.yaml or db/sqlc.yaml); empty skips the sqlc-check job
+        type: string
+        default: ''
+      sqlc-generated-path:
+        description: Path whose cleanliness proves generated code is fresh; empty diffs the whole tree
+        type: string
+        default: ''
+      apispec-version:
+        description: antst/go-apispec version for OpenAPI regeneration
+        type: string
+        default: v0.4.16
+      openapi-make-target:
+        description: Make target that regenerates the OpenAPI spec; empty skips the openapi job
+        type: string
+        default: ''
+      openapi-file:
+        description: Generated spec file checked for staleness
+        type: string
+        default: openapi.yaml
+      extra-suite-tags:
+        description: Build tags for an additional test-suite job (e.g. "vips"); empty skips
+        type: string
+        default: ''
+      extra-suite-apt:
+        description: apt packages the extra suite needs (space-separated)
+        type: string
+        default: ''
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: go vet
+        if: inputs.run-vet
+        run: go vet ./...
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: ${{ inputs.golangci-lint-version }}
+
+  test-unit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run tests
+        run: |
+          flags="${{ inputs.go-test-flags }}"
+          if [ "${{ inputs.coverage }}" = "true" ]; then
+            flags="$flags -coverprofile=coverage.out -covermode=atomic"
+          fi
+          go test $flags ./...
+
+      - name: Coverage summary
+        if: inputs.coverage
+        run: |
+          total=$(go tool cover -func=coverage.out | tail -1)
+          echo "$total"
+          echo "**Coverage:** \`$total\`" >> "$GITHUB_STEP_SUMMARY"
+
+  build:
+    if: inputs.run-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Build
+        run: go build ./...
+
+  test-extra:
+    if: inputs.extra-suite-tags != ''
+    name: test-${{ inputs.extra-suite-tags }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install suite dependencies
+        if: inputs.extra-suite-apt != ''
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ inputs.extra-suite-apt }}
+
+      - name: Run tagged suite
+        run: go test -tags '${{ inputs.extra-suite-tags }}' ${{ inputs.go-test-flags }} ./...
+
+  sqlc-check:
+    if: inputs.sqlc-config != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install sqlc
+        # Pinned ≤ v1.30.0 territory deliberately: sqlc ≥ 1.31.1 requires Go 1.26;
+        # bump together with the org's oldest go.mod.
+        run: go install github.com/sqlc-dev/sqlc/cmd/sqlc@${{ inputs.sqlc-version }}
+
+      - name: Verify generated code is fresh
+        run: |
+          sqlc -f '${{ inputs.sqlc-config }}' generate
+          target='${{ inputs.sqlc-generated-path }}'
+          if [ -n "$target" ]; then
+            git diff --exit-code -- "$target" || { echo "::error::sqlc-generated code is stale — run 'sqlc generate' and commit"; exit 1; }
+          else
+            git diff --exit-code || { echo "::error::sqlc-generated code is stale — run 'sqlc generate' and commit"; exit 1; }
+          fi
+
+  openapi:
+    if: inputs.openapi-make-target != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6.0.3
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Install apispec
+        run: go install github.com/antst/go-apispec/cmd/apispec@${{ inputs.apispec-version }}
+
+      - name: Verify OpenAPI spec is fresh
+        run: |
+          make '${{ inputs.openapi-make-target }}'
+          git diff --exit-code -- '${{ inputs.openapi-file }}' || { echo "::error::${{ inputs.openapi-file }} is stale — regenerate and commit"; exit 1; }
