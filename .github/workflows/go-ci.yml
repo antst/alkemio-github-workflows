@@ -83,6 +83,9 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: ${{ inputs.golangci-lint-version }}
+          # Include build-tagged files (e.g. vips) — without this, tagged code
+          # is invisible to lint even though the extra suite tests it.
+          args: ${{ inputs.extra-suite-tags != '' && format('--build-tags {0}', inputs.extra-suite-tags) || '' }}
 
   test-unit:
     runs-on: ubuntu-latest
