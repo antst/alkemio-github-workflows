@@ -79,6 +79,13 @@ jobs:
         if: inputs.run-vet
         run: go vet ./...
 
+      - name: Install lint build-tag dependencies
+        # When linting build-tagged files (e.g. vips), golangci-lint compiles the
+        # tagged cgo packages, which need the same system libs the extra suite
+        # does — install them here too, not just in the test-extra job.
+        if: inputs.extra-suite-tags != '' && inputs.extra-suite-apt != ''
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ${{ inputs.extra-suite-apt }}
+
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
