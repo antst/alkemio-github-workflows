@@ -98,6 +98,7 @@ jobs:
     timeout-minutes: 15
     permissions:
       contents: read
+      packages: write    # push the GHCR mirror (GITHUB_TOKEN)
     steps:
       - name: Docker meta
         id: meta
@@ -108,7 +109,13 @@ jobs:
           # configs alone are invisible to tooling reading the tagged index.
           DOCKER_METADATA_ANNOTATIONS_LEVELS: index
         with:
-          images: ${{ env.REGISTRY_IMAGE }}
+          # Docker Hub is the primary registry; GHCR is an additive mirror —
+          # same tags emitted for both, so the single imagetools create below
+          # publishes the multi-arch index to each (carbon-copying the per-arch
+          # manifests from Docker Hub into GHCR).
+          images: |
+            ${{ env.REGISTRY_IMAGE }}
+            ghcr.io/${{ github.repository }}
           tags: |
             type=semver,pattern=v{{version}}
             type=semver,pattern=v{{major}}.{{minor}}
@@ -146,6 +153,13 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Login to GHCR (mirror)
+        uses: docker/login-action@v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create multi-arch manifest and push
         working-directory: ${{ runner.temp }}/digests

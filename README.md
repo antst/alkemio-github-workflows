@@ -92,6 +92,7 @@ jobs:
     uses: antst/alkemio-github-workflows/.github/workflows/container-release.yml@v1
     permissions:
       contents: read
+      packages: write    # GHCR mirror (ghcr.io/<owner>/<repo>); Docker Hub stays primary
     secrets:
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
