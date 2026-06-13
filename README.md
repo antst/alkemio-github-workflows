@@ -27,8 +27,11 @@ moved. Breaking caller-interface changes go to `v2`.
 | `contract-lint.yml` | Redocly lint for handwritten OpenAPI contracts |
 
 Conventions: `concurrency`, triggers, and `permissions` live in the **caller**
-(reusable-workflow limitation / explicitness). Pass `secrets: inherit` except
-where noted.
+(reusable-workflow limitation / explicitness). Pass secrets **explicitly**, not
+via `secrets: inherit` — the PR-image workflow needs only the auto-provided
+`GITHUB_TOKEN` (no `secrets:` block at all), and the release workflow takes
+exactly `DOCKERHUB_USERNAME` + `DOCKERHUB_TOKEN`. Explicit mapping is
+least-privilege and clears the zizmor/CodeRabbit `secrets-inherit` finding.
 
 ## Caller recipes
 
@@ -71,7 +74,7 @@ jobs:
       contents: read
       packages: write
       pull-requests: write
-    secrets: inherit
+    # No secrets block: the workflow uses only the auto-provided GITHUB_TOKEN.
 ```
 
 ### Release (`.github/workflows/build-release-docker-hub.yml`)
@@ -89,7 +92,9 @@ jobs:
     uses: antst/alkemio-github-workflows/.github/workflows/container-release.yml@v1
     permissions:
       contents: read
-    secrets: inherit
+    secrets:
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 ```
 
 ### Deploy (`.github/workflows/build-deploy-k8s-dev-hetzner.yml`)
