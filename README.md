@@ -40,7 +40,7 @@ on:
     types: [opened, synchronize, reopened]
 jobs:
   ci:
-    uses: antst/alkemio-github-workflows/.github/workflows/go-ci.yml@v1
+    uses: alkem-io/github-workflows/.github/workflows/go-ci.yml@v1
     permissions:
       contents: read
     with:
@@ -63,7 +63,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   image:
-    uses: antst/alkemio-github-workflows/.github/workflows/container-pr.yml@v1
+    uses: alkem-io/github-workflows/.github/workflows/container-pr.yml@v1
     permissions:
       contents: read
       packages: write
@@ -83,7 +83,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   release:
-    uses: antst/alkemio-github-workflows/.github/workflows/container-release.yml@v1
+    uses: alkem-io/github-workflows/.github/workflows/container-release.yml@v1
     permissions:
       contents: read
       packages: write    # GHCR mirror (ghcr.io/<owner>/<repo>); Docker Hub stays primary
@@ -101,7 +101,7 @@ on:
     branches: [develop]
 jobs:
   deploy:
-    uses: antst/alkemio-github-workflows/.github/workflows/deploy-hetzner.yml@v1
+    uses: alkem-io/github-workflows/.github/workflows/deploy-hetzner.yml@v1
     with:
       environment: dev
       # name inputs only needed when the repo deviates from the conventions
