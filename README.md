@@ -4,12 +4,6 @@ Central home for the org's CI/CD workflows. Each Alkemio repo keeps only thin
 caller files; the logic, the action versions, and the tool pins (golangci-lint,
 sqlc, apispec, kubectl, …) live **here, once**.
 
-> **Interim location:** this repo temporarily lives at
-> `antst/alkemio-github-workflows` and will be transferred to
-> `alkem-io/github-workflows`. GitHub transfers redirect `uses:` references,
-> so callers keep working through the move; their references get updated to
-> the org path afterwards.
-
 ## Versioning
 
 Callers pin the mutable major tag `@v1` (org convention — no SHA-pinning).
